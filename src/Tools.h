@@ -13,19 +13,17 @@ namespace Sdce
 {
 namespace Tools
 {
-
   /**
-  * A helper method to calculate RMSE.
-  */
+   * @brief Calculates the RMSE.
+   *
+   * @param estimations  The estimations from sensors.
+   * @param ground_truth The ground truth.
+   *
+   * @return The RMSE.
+   */
   Eigen::VectorXd CalculateRMSE(
     const std::vector<Eigen::VectorXd> &estimations,
     const std::vector<Eigen::VectorXd> &ground_truth);
-
-  /**
-  * A helper method to calculate Jacobians.
-  */
-  Eigen::MatrixXd CalculateJacobian(const Eigen::VectorXd& x_state);
-
 } /* namespace Sdce */
 } /* namespace Tools */
 

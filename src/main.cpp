@@ -33,8 +33,8 @@ static const std::string SENSOR_MEASUREMENT_FIELD_NAME = "sensor_measurement";
 
 /* STATIC DECLARATIONS *******************************************************/
 
-static UnscentedKalmanFilter                   ukf;
 static uWS::Hub              webSocketHub;
+static UnscentedKalmanFilter ukf;
 static std::vector<VectorXd> estimations;
 static std::vector<VectorXd> ground_truth;
 
@@ -218,8 +218,10 @@ getEstimatedState(const MeasurementPackage& measurementPackage)
 
   double p_x = ukf.m_stateVector(PX_VECTOR_INDEX);
   double p_y = ukf.m_stateVector(PY_VECTOR_INDEX);
-  double v1  = ukf.m_stateVector(VX_VECTOR_INDEX);
-  double v2  = ukf.m_stateVector(VY_VECTOR_INDEX);
+  double v   = ukf.m_stateVector(VX_VECTOR_INDEX);
+  double yaw = ukf.m_stateVector(VY_VECTOR_INDEX);
+  double v1  = cos(yaw) * v;
+  double v2  = sin(yaw) * v;
 
   estimate(PX_VECTOR_INDEX) = p_x;
   estimate(PY_VECTOR_INDEX) = p_y;
@@ -239,9 +241,9 @@ buildTelemetryResponse(const std::string& sensorMeasurement)
 
   iss >> sensorType;
 
-  if (sensorType.compare(SENSOR_TYPE_NAME_LASER) == 0)
+  if (sensorType == SENSOR_TYPE_NAME_LASER)
     measurementPackage = parseLaserData(iss);
-  else if (sensorType.compare(SENSOR_TYPE_NAME_RADAR) == 0)
+  else if (sensorType == SENSOR_TYPE_NAME_RADAR)
     measurementPackage = parseRadarData(iss);
 
   ground_truth.push_back(parseGroundTruthData(iss));

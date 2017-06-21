@@ -55,6 +55,11 @@ class UnscentedKalmanFilter
     void generatePredictedSigmaPoints(double dt);
 
     /**
+     * @brief Generates the sigma points weights.
+     */
+    void generateWeights();
+
+    /**
      * @brief Prediction Predicts sigma points, the state, and the state covariance matrix.
      *
      * @param deltaT Time between k and k+1 in s
@@ -78,8 +83,6 @@ class UnscentedKalmanFilter
 public:
 
   bool            m_isInitialized;
-  bool            m_useLaser;
-  bool            m_useRadar;
   long long       previousTimestamp;
   Eigen::MatrixXd m_matrixP;
   Eigen::MatrixXd m_predictedSigmaPoints;
