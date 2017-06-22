@@ -50,6 +50,24 @@ getNormalizedAngle(double angle)
   return result;
 }
 
+/**
+ * @brief Gets the sensor state dimension for the data in the given package.
+ *
+ * @param package The sensor data package.
+ *
+ * @return The sensor state dimension.
+ */
+static int
+getSensorStateDimension(const Sdce::MeasurementPackage& package)
+{
+  if (package.sensorType == SENSOR_TYPE_LASER)
+    return LIDAR_STATE_DIMENSION;
+  else if (package.sensorType == SENSOR_TYPE_RADAR)
+    return RADAR_STATE_DIMENSION;
+  else
+    return 0;
+}
+
 /* CLASS IMPLEMENTATION ******************************************************/
 
 namespace Sdce
@@ -57,7 +75,7 @@ namespace Sdce
 
 UnscentedKalmanFilter::UnscentedKalmanFilter()
 : m_isInitialized(false)
-, previousTimestamp(0)
+, m_previousTimestamp(0)
 {
   m_stateVector          = VectorXd(STATE_DIMENSION);
   m_matrixP              = MatrixXd(STATE_DIMENSION, STATE_DIMENSION);
@@ -95,9 +113,9 @@ UnscentedKalmanFilter::processMeasurement(const MeasurementPackage& package)
     return;
   }
 
-  float dt = (package.timestamp - previousTimestamp) / 1000000.0;
+  float dt = (package.timestamp - m_previousTimestamp) / 1000000.0;
 
-  previousTimestamp = package.timestamp;
+  m_previousTimestamp = package.timestamp;
 
   predict(dt);
 
@@ -123,7 +141,7 @@ UnscentedKalmanFilter::initialize(const MeasurementPackage& package)
   }
 
   m_matrixP         = MatrixXd::Identity(STATE_DIMENSION, STATE_DIMENSION);
-  previousTimestamp = package.timestamp;
+  m_previousTimestamp = package.timestamp;
   m_isInitialized   = true;
 }
 
@@ -194,18 +212,16 @@ UnscentedKalmanFilter::generatePredictedSigmaPoints(double delta_t)
         py_p = p_y + vXdelta_t * sin(yaw);
     }
 
-    double v_p    = v;
-    double yaw_p  = yaw + yawd * delta_t;
-    double yawd_p = yawd;
-
+    double v_p         = v;
+    double yaw_p       = yaw + yawd * delta_t;
+    double yawd_p      = yawd;
     double nuaXdelta_t = nu_a * delta_t;
-    double xy_noise_c1 = 0.5 * nuaXdelta_t * delta_t;
+    double xy_noise_c1 = 0.5  * nuaXdelta_t * delta_t;
 
     //add noise
-    px_p = px_p + xy_noise_c1 * cos(yaw);
-    py_p = py_p + xy_noise_c1 * sin(yaw);
-    v_p  = v_p  + nuaXdelta_t;
-
+    px_p   = px_p + xy_noise_c1 * cos(yaw);
+    py_p   = py_p + xy_noise_c1 * sin(yaw);
+    v_p    = v_p  + nuaXdelta_t;
     yaw_p  = yaw_p  + 0.5 * nu_yawdd * delta_t * delta_t;
     yawd_p = yawd_p + nu_yawdd * delta_t;
 
@@ -264,81 +280,80 @@ UnscentedKalmanFilter::predict(double delta_t)
 }
 
 void
-UnscentedKalmanFilter::updateFromLidar(const MeasurementPackage& package)
+UnscentedKalmanFilter::doUpdate(
+  const MeasurementPackage& package,
+  const MatrixXd& sigmaPoints,
+  const MatrixXd& matrixS,
+  const VectorXd& predictedSensorState)
 {
-  MatrixXd Zsig = m_predictedSigmaPoints.block(0, 0, LIDAR_STATE_DIMENSION, SIGMA_POINTS_COUNT);
+  int      sensorStateDimension = getSensorStateDimension(package);
+  VectorXd z                    = VectorXd(sensorStateDimension);
+  MatrixXd Tc                   = MatrixXd(STATE_DIMENSION, sensorStateDimension);
 
-  //mean predicted measurement
-  VectorXd z_pred = VectorXd(LIDAR_STATE_DIMENSION);
+  if (package.sensorType == SENSOR_TYPE_RADAR)
+    z << package.rawMeasurements[0], package.rawMeasurements[1], package.rawMeasurements[2];
+  else if (package.sensorType == SENSOR_TYPE_LASER)
+    z << package.rawMeasurements[0], package.rawMeasurements[1];
 
-  z_pred.fill(0.0);
-
-  for (int i = 0; i < SIGMA_POINTS_COUNT; ++i)
-    z_pred = z_pred + m_sigmaPointsWeights(i) * Zsig.col(i);
-
-  MatrixXd S = MatrixXd(LIDAR_STATE_DIMENSION, LIDAR_STATE_DIMENSION);
-
-  S.fill(0.0);
-
-  for (int i = 0; i < SIGMA_POINTS_COUNT; ++i)
-  {
-    VectorXd z_diff = Zsig.col(i) - z_pred;
-
-    z_diff(1) = getNormalizedAngle(z_diff(1));
-
-    S = S + m_sigmaPointsWeights(i) * z_diff * z_diff.transpose();
-  }
-
-  S = S + m_lidarMatrixR;
-
-  /*****************************************************************************
-  *  Update
-  ****************************************************************************/
-
-  VectorXd z = VectorXd(LIDAR_STATE_DIMENSION);
-  z << package.rawMeasurements[0],  package.rawMeasurements[1];
-
-  //create matrix for cross correlation Tc
-  MatrixXd Tc = MatrixXd(STATE_DIMENSION, LIDAR_STATE_DIMENSION);
-
-  //calculate cross correlation matrix
   Tc.fill(0.0);
 
   for (int i = 0; i < SIGMA_POINTS_COUNT; ++i)
   {
-    //residual
-    VectorXd z_diff = Zsig.col(i) - z_pred;
+    VectorXd z_diff = sigmaPoints.col(i) - predictedSensorState;
+    VectorXd x_diff = m_predictedSigmaPoints.col(i) - m_stateVector;
 
     z_diff(1) = getNormalizedAngle(z_diff(1));
-
-    // state difference
-    VectorXd x_diff = m_predictedSigmaPoints.col(i) - m_stateVector;
-    //angle normalization
-
     x_diff(3) = getNormalizedAngle(x_diff(3));
-
-    Tc = Tc + m_sigmaPointsWeights(i) * x_diff * z_diff.transpose();
+    Tc        = Tc + m_sigmaPointsWeights(i) * x_diff * z_diff.transpose();
   }
 
-  //Kalman gain K;
-  MatrixXd K = Tc * S.inverse();
-
-  //residual
-  VectorXd z_diff = z - z_pred;
-
-  //angle normalization
+  MatrixXd kalmanGainK = Tc * matrixS.inverse();
+  VectorXd z_diff = z - predictedSensorState;
 
   z_diff(1) = getNormalizedAngle(z_diff(1));
 
-  //update state mean and covariance matrix
-  m_stateVector = m_stateVector + K * z_diff;
-  m_matrixP     = m_matrixP     - K * S * K.transpose();
+  m_stateVector = m_stateVector + kalmanGainK * z_diff;
+  m_matrixP     = m_matrixP     - kalmanGainK * matrixS * kalmanGainK.transpose();
+
+  VectorXd nisC1 = package.rawMeasurements - predictedSensorState;
+
+  m_Nis = nisC1.transpose() * matrixS.inverse() * nisC1;
+}
+
+void
+UnscentedKalmanFilter::updateFromLidar(const MeasurementPackage& package)
+{
+  MatrixXd sigmaPoints          = m_predictedSigmaPoints.block(0, 0, LIDAR_STATE_DIMENSION, SIGMA_POINTS_COUNT);
+  VectorXd predictedSensorState = VectorXd(LIDAR_STATE_DIMENSION);
+  MatrixXd matrixS              = MatrixXd(LIDAR_STATE_DIMENSION, LIDAR_STATE_DIMENSION);
+
+  predictedSensorState.fill(0.0);
+  matrixS.fill(0.0);
+
+  for (int i = 0; i < SIGMA_POINTS_COUNT; ++i)
+    predictedSensorState = predictedSensorState + m_sigmaPointsWeights(i) * sigmaPoints.col(i);
+
+  for (int i = 0; i < SIGMA_POINTS_COUNT; ++i)
+  {
+    VectorXd z_diff = sigmaPoints.col(i) - predictedSensorState;
+    z_diff(1) = getNormalizedAngle(z_diff(1));
+    matrixS   = matrixS + m_sigmaPointsWeights(i) * z_diff * z_diff.transpose();
+  }
+
+  matrixS = matrixS + m_lidarMatrixR;
+
+  doUpdate(package, sigmaPoints, matrixS, predictedSensorState);
 }
 
 void
 UnscentedKalmanFilter::updateFromRadar(const MeasurementPackage& package)
 {
-  MatrixXd Zsig = MatrixXd(RADAR_STATE_DIMENSION, SIGMA_POINTS_COUNT);
+  MatrixXd Zsig   = MatrixXd(RADAR_STATE_DIMENSION, SIGMA_POINTS_COUNT);
+  VectorXd z_pred = VectorXd(RADAR_STATE_DIMENSION);
+  MatrixXd S      = MatrixXd(RADAR_STATE_DIMENSION, RADAR_STATE_DIMENSION);
+
+  z_pred.fill(0.0);
+  S.fill(0.0);
 
   for (int i = 0; i < SIGMA_POINTS_COUNT; ++i)
   {
@@ -350,10 +365,7 @@ UnscentedKalmanFilter::updateFromRadar(const MeasurementPackage& package)
     double v1 = cos(yaw) * v;
     double v2 = sin(yaw) * v;
 
-    // measurement model
-    Zsig(0, i) = sqrt(p_x * p_x + p_y * p_y);//r
-//    Zsig(1, i) = atan2(p_y, p_x);//phi
-//    Zsig(2, i) = (p_x * v1 + p_y * v2 ) / sqrt(p_x * p_x + p_y * p_y);
+    Zsig(0, i) = sqrt(p_x * p_x + p_y * p_y);
 
     if (fabs(p_y) > 0.001 && fabs(p_x) > 0.001)
       Zsig(1, i) = atan2(p_y, p_x);
@@ -366,16 +378,10 @@ UnscentedKalmanFilter::updateFromRadar(const MeasurementPackage& package)
       Zsig(2, i) = 0.0;
   }
 
-  //mean predicted measurement
-  VectorXd z_pred = VectorXd(RADAR_STATE_DIMENSION);
-  z_pred.fill(0.0);
-
   for (int i = 0; i < SIGMA_POINTS_COUNT; ++i)
     z_pred = z_pred + m_sigmaPointsWeights(i) * Zsig.col(i);
 
   //measurement covariance matrix S
-  MatrixXd S = MatrixXd(RADAR_STATE_DIMENSION, RADAR_STATE_DIMENSION);
-  S.fill(0.0);
 
   for (int i = 0; i < SIGMA_POINTS_COUNT; ++i)
   {
@@ -389,47 +395,7 @@ UnscentedKalmanFilter::updateFromRadar(const MeasurementPackage& package)
   //add measurement noise covariance matrix
   S = S + m_radarMatrixR;
 
-  /*****************************************************************************
-  *  Update
-  ****************************************************************************/
-
-  // Parse radar measurement
-  VectorXd z = VectorXd(RADAR_STATE_DIMENSION);
-  z << package.rawMeasurements[0],
-    package.rawMeasurements[1],
-    package.rawMeasurements[2];
-
-  //create matrix for cross correlation Tc
-  MatrixXd Tc = MatrixXd(STATE_DIMENSION, RADAR_STATE_DIMENSION);
-
-  //calculate cross correlation matrix
-  Tc.fill(0.0);
-
-  for (int i = 0; i < SIGMA_POINTS_COUNT; ++i)
-  {
-    VectorXd z_diff = Zsig.col(i) - z_pred;
-
-    z_diff(1) = getNormalizedAngle(z_diff(1));
-
-    // state difference
-    VectorXd x_diff = m_predictedSigmaPoints.col(i) - m_stateVector;
-
-    x_diff(3) = getNormalizedAngle(x_diff(3));
-
-    Tc = Tc + m_sigmaPointsWeights(i) * x_diff * z_diff.transpose();
-  }
-
-  //Kalman gain K;
-  MatrixXd K = Tc * S.inverse();
-
-  //residual
-  VectorXd z_diff = z - z_pred;
-
-  z_diff(1) = getNormalizedAngle(z_diff(1));
-
-  //update state mean and covariance matrix
-  m_stateVector = m_stateVector + K * z_diff;
-  m_matrixP     = m_matrixP     - K * S * K.transpose();
+  doUpdate(package, Zsig, S, z_pred);
 }
 
 } /* namespace Sdce */

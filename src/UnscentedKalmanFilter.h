@@ -67,6 +67,20 @@ class UnscentedKalmanFilter
     void predict(double deltaT);
 
     /**
+     * @brief Performs the update step.
+     *
+     * @param package              The measurements pacakge from the sensor.
+     * @param sigmaPoints          The generated sigma points for the sensor state.
+     * @param matrixS              The S matrix.
+     * @param predictedSensorState The predicted sensor state vector.
+     */
+    void doUpdate(
+      const MeasurementPackage& package,
+      const Eigen::MatrixXd& sigmaPoints,
+      const Eigen::MatrixXd& matrixS,
+      const Eigen::VectorXd& predictedSensorState);
+
+    /**
      * @brief Updates the state and the state covariance matrix using a laser measurement.
      *
      * @param package The measurement at k+1
@@ -83,7 +97,8 @@ class UnscentedKalmanFilter
 public:
 
   bool            m_isInitialized;
-  long long       previousTimestamp;
+  double          m_Nis;
+  long long       m_previousTimestamp;
   Eigen::MatrixXd m_matrixP;
   Eigen::MatrixXd m_predictedSigmaPoints;
   Eigen::MatrixXd m_lidarMatrixR;
