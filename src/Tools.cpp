@@ -26,7 +26,7 @@ CalculateRMSE(const std::vector<VectorXd> &estimations, const std::vector<Vector
   const bool hasCorrectSize = estimations.size() > 0 && estimations.size() == ground_truth.size();
   VectorXd   rmse(RMSE_VECTOR_SIZE);
 
-  rmse << 0,0,0,0;
+  rmse.fill(0.0);
 
   if(hasCorrectSize == false)
   {

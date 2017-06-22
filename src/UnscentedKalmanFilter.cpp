@@ -16,11 +16,11 @@ static const int    LIDAR_STATE_DIMENSION               = 2;
 static const int    RADAR_STATE_DIMENSION               = 3;
 static const int    STATE_DIMENSION                     = 5;
 static const int    AUGMENTED_STATE_DIMENSION           = 7;
-static const double LAMBDA                              = 3 - STATE_DIMENSION;
 static const int    SIGMA_POINTS_COUNT                  = 2 * AUGMENTED_STATE_DIMENSION + 1;
+static const double LAMBDA                              = 3 - STATE_DIMENSION;
 static const double TWO_PI                              = 2. * M_PI;
-static const double NOISE_STD_LONGITUDINAL_ACCELERATION = 1.8;
-static const double NOISE_STD_YAW_ACCELERATION          = 0.7;
+static const double NOISE_STD_LONGITUDINAL_ACCELERATION = 0.5;
+static const double NOISE_STD_YAW_ACCELERATION          = 0.5;
 static const double NOISE_STD_LASER_SENSOR_PX           = 0.15;
 static const double NOISE_STD_LASER_SENSOR_PY           = 0.15;
 static const double NOISE_STD_RADAR_SENSOR_RADIUS       = 0.3;
@@ -55,15 +55,12 @@ getNormalizedAngle(double angle)
 namespace Sdce
 {
 
-/**
- * Initializes Unscented Kalman filter
- */
 UnscentedKalmanFilter::UnscentedKalmanFilter()
 : m_isInitialized(false)
 , previousTimestamp(0)
 {
   m_stateVector          = VectorXd(STATE_DIMENSION);
-  m_matrixP              = MatrixXd::Identity(STATE_DIMENSION, STATE_DIMENSION);
+  m_matrixP              = MatrixXd(STATE_DIMENSION, STATE_DIMENSION);
   m_lidarMatrixR         = MatrixXd(LIDAR_STATE_DIMENSION, LIDAR_STATE_DIMENSION);
   m_radarMatrixR         = MatrixXd(RADAR_STATE_DIMENSION, RADAR_STATE_DIMENSION);
   m_predictedSigmaPoints = MatrixXd(STATE_DIMENSION, SIGMA_POINTS_COUNT);
@@ -125,6 +122,7 @@ UnscentedKalmanFilter::initialize(const MeasurementPackage& package)
     m_stateVector << package.rawMeasurements[0], package.rawMeasurements[1], 0, 0, 0;
   }
 
+  m_matrixP         = MatrixXd::Identity(STATE_DIMENSION, STATE_DIMENSION);
   previousTimestamp = package.timestamp;
   m_isInitialized   = true;
 }
@@ -254,7 +252,7 @@ UnscentedKalmanFilter::predict(double delta_t)
   for (int i = 0; i < SIGMA_POINTS_COUNT; ++i)
   {
     // state difference
-    VectorXd x_diff = m_predictedSigmaPoints.col(i) - m_stateVector;
+    VectorXd x_diff = m_predictedSigmaPoints.col(i) - x;
 
     x_diff(3) = getNormalizedAngle(x_diff(3));
 
@@ -389,7 +387,6 @@ UnscentedKalmanFilter::updateFromRadar(const MeasurementPackage& package)
   }
 
   //add measurement noise covariance matrix
-
   S = S + m_radarMatrixR;
 
   /*****************************************************************************
